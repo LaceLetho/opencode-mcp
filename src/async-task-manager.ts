@@ -172,24 +172,12 @@ class AsyncTaskManager {
     }
   }
 
-  /**
-   * Send webhook callback to OpenClaw.
-   */
   private async sendCallback(task: AsyncTask): Promise<void> {
     try {
-      const payload = {
-        taskId: task.id,
-        sessionId: task.sessionId,
-        status: task.status,
-        result: task.result,
-        error: task.error,
-        prompt: task.prompt,
-        providerID: task.providerID,
-        modelID: task.modelID,
-        directory: task.directory,
-        createdAt: task.createdAt.toISOString(),
-        completedAt: task.completedAt?.toISOString(),
-      };
+      const isOpenClawHook = task.callbackUrl.includes("/hooks/agent");
+      const payload = isOpenClawHook
+        ? this.buildOpenClawPayload(task)
+        : this.buildGenericPayload(task);
 
       const response = await fetch(task.callbackUrl, {
         method: "POST",
@@ -210,6 +198,44 @@ class AsyncTaskManager {
     } catch (e) {
       console.error(`[AsyncTaskManager] Failed to send callback for task ${task.id}:`, e);
     }
+  }
+
+  private buildOpenClawPayload(task: AsyncTask): Record<string, unknown> {
+    const statusEmoji = task.status === "completed" ? "✅" : task.status === "failed" ? "❌" : "⏱️";
+    const resultText = task.result || task.error || "No result";
+    const message = `${statusEmoji} Task ${task.id} ${task.status}
+
+Prompt: ${task.prompt}
+
+Result:
+${resultText}`;
+
+    return {
+      message,
+      name: "OpenCode Async Task",
+      agentId: "main",
+      wakeMode: "now",
+      deliver: true,
+      channel: "last",
+      model: task.modelID,
+      timeoutSeconds: 300,
+    };
+  }
+
+  private buildGenericPayload(task: AsyncTask): Record<string, unknown> {
+    return {
+      taskId: task.id,
+      sessionId: task.sessionId,
+      status: task.status,
+      result: task.result,
+      error: task.error,
+      prompt: task.prompt,
+      providerID: task.providerID,
+      modelID: task.modelID,
+      directory: task.directory,
+      createdAt: task.createdAt.toISOString(),
+      completedAt: task.completedAt?.toISOString(),
+    };
   }
 
   /**

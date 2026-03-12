@@ -977,15 +977,15 @@ export function registerWorkflowTools(
   // ─── Fire async with OpenClaw callback ─────────────────────────────
   server.tool(
     "opencode_fire_async",
-    "ASYNC TASK FOR OPENCLAW: Fire-and-forget task with automatic webhook callback when complete. This tool is specifically designed for OpenClaw integration - it dispatches a task and automatically notifies OpenClaw via webhook when finished. Use this when OpenClaw needs to initiate long-running tasks and be notified upon completion.",
+    "ASYNC TASK FOR OPENCLAW: Fire-and-forget task with automatic webhook callback when complete. This tool is specifically designed for OpenClaw integration - it dispatches a task and automatically notifies OpenClaw via its /hooks/agent endpoint when finished. The callbackUrl should be OpenClaw's /hooks/agent endpoint (e.g., http://localhost:18789/hooks/agent). Use this when OpenClaw needs to initiate long-running tasks and be notified upon completion.",
     {
       prompt: z.string().describe("The task or instruction to send to OpenCode"),
-      callbackUrl: z.string().describe("OpenClaw webhook URL to receive completion notification (REQUIRED for OpenClaw integration)"),
+      callbackUrl: z.string().describe("OpenClaw /hooks/agent endpoint URL (e.g., http://localhost:18789/hooks/agent). OpenClaw must have hooks.enabled: true in its config"),
       taskId: z.string().optional().describe("Optional custom task ID. If not provided, a UUID will be generated"),
       sessionId: z.string().optional().describe("Existing session ID to continue (omit to create a new session)"),
       title: z.string().optional().describe("Session title (only for new sessions)"),
       providerID: z.string().optional().describe("Provider ID (e.g. 'anthropic')"),
-      modelID: z.string().optional().describe("Model ID (e.g. 'claude-opus-4-6')"),
+      modelID: z.string().optional().describe("Model ID (e.g. 'claude-sonnet-4-5')"),
       agent: z.string().optional().describe("Agent to use"),
       directory: directoryParam,
     },
@@ -1034,17 +1034,17 @@ export function registerWorkflowTools(
         await client.post(`/session/${sid}/message`, body, { directory });
 
         const dirLabel = directory ? `Directory: ${directory}\n` : "";
+        const isOpenClawHook = callbackUrl.includes("/hooks/agent");
         return toolResult(
           `${dirLabel}🚀 ASYNC TASK DISPATCHED FOR OPENCLAW\n\n` +
           `Task ID: ${tid}\n` +
           `Session: ${sid}\n` +
-          `Callback URL: ${callbackUrl}\n\n` +
-          `⚠️  IMPORTANT: This is an ASYNC task. OpenCode is working in the background.\n` +
-          `📬 OpenClaw will receive a webhook callback when the task completes.\n\n` +
+          `Callback: ${callbackUrl}\n\n` +
+          `⚠️  This is an ASYNC task. OpenCode is working in the background.\n` +
+          `${isOpenClawHook ? `📬 OpenClaw will receive the result at its /hooks/agent endpoint.\n` : `📬 Webhook will be sent to the provided URL when complete.\n`}\n` +
           `Monitor options:\n` +
           `- \`opencode_async_task_status({taskId: "${tid}"})\` — check task progress\n` +
-          `- \`opencode_check({sessionId: "${sid}"})\` — check session status\n` +
-          `- Webhook will be sent to: ${callbackUrl}`,
+          `- \`opencode_check({sessionId: "${sid}"})\` — check session status`,
         );
       } catch (e) {
         return toolError(e);

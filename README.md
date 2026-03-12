@@ -58,46 +58,96 @@ Your MCP client calls tools over stdio. This server translates them into HTTP re
 
 ## OpenClaw Async Callbacks (Optional)
 
-To use the `opencode_fire_async` tool with automatic webhook callbacks to OpenClaw, you need to install the `opencode-openclaw-plugin` in your OpenCode server:
+To use the `opencode_fire_async` tool with automatic webhook callbacks to OpenClaw, you need to:
+
+### 1. Install the Plugin in OpenCode
 
 ```bash
 # Install the plugin in your OpenCode project
 npm install @opencode-ai/plugin-openclaw
 ```
 
-Then configure it in your `opencode.json`:
+### 2. Configure OpenClaw to Receive Webhooks
+
+Add this to your OpenClaw configuration file (`~/.openclaw/openclaw.json`):
+
+```json
+{
+  "hooks": {
+    "enabled": true,
+    "token": "your-secure-hooks-token",
+    "path": "/hooks",
+    "allowedAgentIds": ["main"],
+    "defaultSessionKey": "hook:opencode",
+    "allowRequestSessionKey": false
+  }
+}
+```
+
+**Required settings:**
+- `enabled: true` — Enables the hooks system
+- `token` — Secret token for webhook authentication (keep this secure)
+- `allowedAgentIds` — Which agents can receive hook messages (use `["*"]` to allow any)
+
+### 3. Configure the Plugin in OpenCode
+
+Add to your `opencode.json`:
 
 ```json
 {
   "plugins": ["@opencode-ai/plugin-openclaw"],
   "openclaw": {
     "port": 9090,
-    "openclawWebhookUrl": "https://your-openclaw-server.com/webhook/opencode-results",
-    "openclawApiKey": "${OPENCLAW_API_KEY}",
+    "openclawWebhookUrl": "http://localhost:18789/hooks/agent",
+    "openclawApiKey": "your-secure-hooks-token",
     "maxConcurrentTasks": 5
   }
 }
 ```
 
-> **Note:** The `opencode_fire_async` tool works without this plugin, but the webhook callback feature requires the plugin to be installed and configured in OpenCode.
+**Important:** The `openclawWebhookUrl` should point to OpenClaw's `/hooks/agent` endpoint (not a custom webhook URL). The `openclawApiKey` must match the `hooks.token` in your OpenClaw config.
+
+> **Note:** The `opencode_fire_async` tool works without this plugin, but the automatic webhook callback to OpenClaw requires the plugin to be installed and configured.
 
 ### Webhook Callback Format
 
-When a task completes, OpenClaw receives a POST request with this payload:
+When a task completes, OpenClaw receives a POST request to `/hooks/agent` with this payload:
 
 ```json
 {
-  "taskId": "task_abc123",
-  "sessionId": "ses_xyz789",
-  "status": "completed",
-  "result": "Task execution results...",
-  "prompt": "Original task prompt",
-  "providerID": "anthropic",
-  "modelID": "claude-opus-4-6",
-  "directory": "/path/to/project",
-  "createdAt": "2024-03-12T10:00:00Z",
-  "completedAt": "2024-03-12T10:05:00Z"
+  "message": "Task completed successfully.\n\nResults:\n[Task execution output...]",
+  "name": "OpenCode Async Task",
+  "agentId": "main",
+  "wakeMode": "now",
+  "deliver": true,
+  "channel": "last",
+  "model": "anthropic/claude-sonnet-4-5",
+  "timeoutSeconds": 300
 }
+```
+
+**Headers:**
+```
+Authorization: Bearer your-secure-hooks-token
+Content-Type: application/json
+```
+
+OpenClaw will process this message and can forward it to your configured messaging channels (Telegram, Slack, Discord, etc.).
+
+### Testing the Integration
+
+Test that OpenClaw can receive webhooks:
+
+```bash
+curl -X POST http://localhost:18789/hooks/agent \
+  -H "Authorization: Bearer your-secure-hooks-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Test message from OpenCode",
+    "name": "Test",
+    "deliver": true,
+    "channel": "last"
+  }'
 ```
 
 ## Key Tools
@@ -148,27 +198,35 @@ opencode_check({ sessionId: "..." })
 **OpenClaw async with automatic callback:**
 ```
 // REQUIREMENT: Install @opencode-ai/plugin-openclaw in OpenCode
+// Configure OpenClaw with hooks.enabled: true
 // See "OpenClaw Async Callbacks" section above for setup
 
 // OpenClaw initiates a long-running task and gets notified automatically
 opencode_fire_async({
   prompt: "Refactor the entire codebase to TypeScript with strict types",
-  callbackUrl: "https://openclaw.example.com/webhook/opencode-completion",
+  callbackUrl: "http://localhost:18789/hooks/agent",  // OpenClaw's built-in endpoint
   providerID: "anthropic",
-  modelID: "claude-opus-4-6"
+  modelID: "claude-sonnet-4-5",
+  callbackConfig: {
+    name: "OpenCode Task",
+    agentId: "main",
+    deliver: true,
+    channel: "telegram"  // or "last", "slack", "discord"
+  }
 })
 → returns immediately with taskId
 → OpenCode works in the background
-→ When complete, OpenClaw receives webhook callback automatically
+→ When complete, OpenClaw receives webhook at /hooks/agent
+→ OpenClaw forwards to your configured messaging channel
 
-// Webhook payload sent to OpenClaw:
+// Webhook payload sent to OpenClaw /hooks/agent:
 {
-  "taskId": "task_xxx",
-  "sessionId": "ses_xxx",
-  "status": "completed",
-  "result": "...",
-  "prompt": "Refactor the entire codebase...",
-  "completedAt": "2024-03-12T10:05:00Z"
+  "message": "Task completed successfully...",
+  "name": "OpenCode Async Task",
+  "agentId": "main",
+  "deliver": true,
+  "channel": "telegram",
+  "model": "anthropic/claude-sonnet-4-5"
 }
 ```
 
