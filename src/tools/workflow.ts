@@ -973,4 +973,188 @@ export function registerWorkflowTools(
       }
     },
   );
+
+  // ─── Fire async with OpenClaw callback ─────────────────────────────
+  server.tool(
+    "opencode_fire_async",
+    "ASYNC TASK FOR OPENCLAW: Fire-and-forget task with automatic webhook callback when complete. This tool is specifically designed for OpenClaw integration - it dispatches a task and automatically notifies OpenClaw via webhook when finished. Use this when OpenClaw needs to initiate long-running tasks and be notified upon completion.",
+    {
+      prompt: z.string().describe("The task or instruction to send to OpenCode"),
+      callbackUrl: z.string().describe("OpenClaw webhook URL to receive completion notification (REQUIRED for OpenClaw integration)"),
+      taskId: z.string().optional().describe("Optional custom task ID. If not provided, a UUID will be generated"),
+      sessionId: z.string().optional().describe("Existing session ID to continue (omit to create a new session)"),
+      title: z.string().optional().describe("Session title (only for new sessions)"),
+      providerID: z.string().optional().describe("Provider ID (e.g. 'anthropic')"),
+      modelID: z.string().optional().describe("Model ID (e.g. 'claude-opus-4-6')"),
+      agent: z.string().optional().describe("Agent to use"),
+      directory: directoryParam,
+    },
+    async ({ prompt, callbackUrl, taskId, sessionId, title, providerID, modelID, agent, directory }) => {
+      try {
+        const { initTaskManager, getTaskManager } = await import("../async-task-manager.js");
+
+        // Initialize task manager if not already done
+        let taskManager = getTaskManager();
+        if (!taskManager) {
+          taskManager = initTaskManager(client);
+        }
+
+        // Generate task ID if not provided
+        const tid = taskId ?? `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+        // 1. Create or reuse session
+        let sid = sessionId;
+        if (!sid) {
+          const session = (await client.post("/session", {
+            title: title ?? prompt.slice(0, 80),
+          }, { directory })) as Record<string, unknown>;
+          sid = session.id as string;
+        }
+
+        // 2. Register async task with the manager
+        const model = applyModelDefaults(providerID, modelID);
+        await taskManager.registerTask(
+          tid,
+          sid,
+          prompt,
+          callbackUrl,
+          directory,
+          model?.providerID ?? providerID,
+          model?.modelID ?? modelID,
+        );
+
+        // 3. Send async message to OpenCode
+        const body: Record<string, unknown> = {
+          parts: [{ type: "text", text: prompt }],
+          noReply: false,
+        };
+        if (model) body.model = model;
+        if (agent) body.agent = agent;
+
+        await client.post(`/session/${sid}/message`, body, { directory });
+
+        const dirLabel = directory ? `Directory: ${directory}\n` : "";
+        return toolResult(
+          `${dirLabel}🚀 ASYNC TASK DISPATCHED FOR OPENCLAW\n\n` +
+          `Task ID: ${tid}\n` +
+          `Session: ${sid}\n` +
+          `Callback URL: ${callbackUrl}\n\n` +
+          `⚠️  IMPORTANT: This is an ASYNC task. OpenCode is working in the background.\n` +
+          `📬 OpenClaw will receive a webhook callback when the task completes.\n\n` +
+          `Monitor options:\n` +
+          `- \`opencode_async_task_status({taskId: "${tid}"})\` — check task progress\n` +
+          `- \`opencode_check({sessionId: "${sid}"})\` — check session status\n` +
+          `- Webhook will be sent to: ${callbackUrl}`,
+        );
+      } catch (e) {
+        return toolError(e);
+      }
+    },
+  );
+
+  // ─── Get async task status ─────────────────────────────────────────
+  server.tool(
+    "opencode_async_task_status",
+    "Check the status of an async task created with opencode_fire_async. Returns current status, result (if completed), and timing information.",
+    {
+      taskId: z.string().describe("Task ID to check"),
+    },
+    readOnly,
+    async ({ taskId }) => {
+      try {
+        const { getTaskManager } = await import("../async-task-manager.js");
+        const taskManager = getTaskManager();
+
+        if (!taskManager) {
+          return toolError(new Error("Async task manager not initialized"));
+        }
+
+        const task = taskManager.getTask(taskId);
+        if (!task) {
+          return toolResult(`Task ${taskId} not found. It may have expired or never existed.`);
+        }
+
+        const lines: string[] = [
+          `## Async Task: ${task.id}`,
+          `Session: ${task.sessionId}`,
+          `Status: **${task.status}**`,
+          `Created: ${task.createdAt.toISOString()}`,
+        ];
+
+        if (task.completedAt) {
+          const duration = task.completedAt.getTime() - task.createdAt.getTime();
+          lines.push(`Completed: ${task.completedAt.toISOString()}`);
+          lines.push(`Duration: ${Math.round(duration / 1000)}s`);
+        }
+
+        if (task.providerID) lines.push(`Provider: ${task.providerID}`);
+        if (task.modelID) lines.push(`Model: ${task.modelID}`);
+        if (task.directory) lines.push(`Directory: ${task.directory}`);
+
+        lines.push(`\nCallback URL: ${task.callbackUrl}`);
+
+        if (task.result) {
+          const preview = task.result.length > 500 ? task.result.slice(0, 497) + "..." : task.result;
+          lines.push(`\n### Result Preview\n${preview}`);
+        }
+
+        if (task.error) {
+          lines.push(`\n### Error\n${task.error}`);
+        }
+
+        return toolResult(lines.join("\n"));
+      } catch (e) {
+        return toolError(e);
+      }
+    },
+  );
+
+  // ─── List all async tasks ──────────────────────────────────────────
+  server.tool(
+    "opencode_async_tasks_list",
+    "List all async tasks with their statuses. Useful for OpenClaw to see all pending and completed tasks.",
+    {
+      status: z.enum(["running", "completed", "failed", "timeout"]).optional().describe("Filter by status"),
+    },
+    readOnly,
+    async ({ status }) => {
+      try {
+        const { getTaskManager } = await import("../async-task-manager.js");
+        const taskManager = getTaskManager();
+
+        if (!taskManager) {
+          return toolError(new Error("Async task manager not initialized"));
+        }
+
+        const tasks = status
+          ? taskManager.getTasksByStatus(status)
+          : taskManager.getAllTasks();
+
+        if (tasks.length === 0) {
+          return toolResult(status
+            ? `No tasks with status: ${status}`
+            : "No async tasks found. Tasks are created with `opencode_fire_async`.");
+        }
+
+        const lines: string[] = [
+          `## Async Tasks (${tasks.length}${status ? ` ${status}` : ""})`,
+          "",
+        ];
+
+        for (const task of tasks) {
+          const duration = task.completedAt
+            ? ` (${Math.round((task.completedAt.getTime() - task.createdAt.getTime()) / 1000)}s)`
+            : "";
+          lines.push(`- [${task.status}] ${task.id} — Session: ${task.sessionId}${duration}`);
+        }
+
+        lines.push("");
+        lines.push("Check individual task: `opencode_async_task_status({taskId: \"...\"})`");
+
+        return toolResult(lines.join("\n"));
+      } catch (e) {
+        return toolError(e);
+      }
+    },
+  );
 }

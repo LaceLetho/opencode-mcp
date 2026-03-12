@@ -9,7 +9,7 @@
 
 opencode-mcp is an MCP server that bridges your AI tools (Claude, Cursor, Windsurf, VS Code, etc.) to OpenCode's headless API. It lets your AI delegate real coding work — building features, debugging, refactoring, running tests — to OpenCode sessions that autonomously read, write, and execute code in your project.
 
-**79 tools** | **10 resources** | **6 prompts** | **Multi-project** | **Auto-start**
+**82 tools** | **10 resources** | **6 prompts** | **Multi-project** | **Auto-start** | **OpenClaw Async Callbacks**
 
 ## Why Use This?
 
@@ -76,6 +76,9 @@ The 79 tools are organized into tiers. Start with the workflow tools — they ha
 | `opencode_wait` | Poll an async session until it finishes |
 | `opencode_provider_test` | Quick-test whether a provider is working |
 | `opencode_status` | Health + providers + sessions + VCS dashboard |
+| `opencode_fire_async` | **OpenClaw Special**: Fire async task with automatic webhook callback when complete |
+| `opencode_async_task_status` | Check status of async task created with `opencode_fire_async` |
+| `opencode_async_tasks_list` | List all async tasks with filtering by status |
 
 ### Recommended Patterns
 
@@ -95,6 +98,30 @@ opencode_fire({ prompt: "Refactor the auth module to use JWT" })
 → returns sessionId immediately
 opencode_check({ sessionId: "..." })
 → check progress anytime
+```
+
+**OpenClaw async with automatic callback:**
+```
+// OpenClaw initiates a long-running task and gets notified automatically
+opencode_fire_async({
+  prompt: "Refactor the entire codebase to TypeScript with strict types",
+  callbackUrl: "https://openclaw.example.com/webhook/opencode-completion",
+  providerID: "anthropic",
+  modelID: "claude-opus-4-6"
+})
+→ returns immediately with taskId
+→ OpenCode works in the background
+→ When complete, OpenClaw receives webhook callback automatically
+
+// Webhook payload sent to OpenClaw:
+{
+  "taskId": "task_xxx",
+  "sessionId": "ses_xxx",
+  "status": "completed",
+  "result": "...",
+  "prompt": "Refactor the entire codebase...",
+  "completedAt": "2024-03-12T10:05:00Z"
+}
 ```
 
 ### All Tool Categories
