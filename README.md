@@ -17,6 +17,7 @@ opencode-mcp is an MCP server that bridges your AI tools (Claude, Cursor, Windsu
 - **Parallel work** — Fire off multiple tasks to OpenCode while your primary AI keeps working on something else.
 - **Any MCP client** — Works with Claude Desktop, Claude Code, Cursor, Windsurf, VS Code Copilot, Cline, Continue, Zed, Amazon Q, and any other MCP-compatible tool.
 - **Zero setup** — The server auto-starts `opencode serve` if it's not already running. No manual steps.
+- **OpenClaw integration** — Initiate async tasks from OpenClaw and receive automatic webhook callbacks when complete (requires `opencode-openclaw-plugin`).
 
 ## Quick Start
 
@@ -54,6 +55,50 @@ MCP Client  <--stdio-->  opencode-mcp  <--HTTP-->  OpenCode Server
 ```
 
 Your MCP client calls tools over stdio. This server translates them into HTTP requests to the OpenCode headless API. If the OpenCode server isn't running, it's started automatically.
+
+## OpenClaw Async Callbacks (Optional)
+
+To use the `opencode_fire_async` tool with automatic webhook callbacks to OpenClaw, you need to install the `opencode-openclaw-plugin` in your OpenCode server:
+
+```bash
+# Install the plugin in your OpenCode project
+npm install @opencode-ai/plugin-openclaw
+```
+
+Then configure it in your `opencode.json`:
+
+```json
+{
+  "plugins": ["@opencode-ai/plugin-openclaw"],
+  "openclaw": {
+    "port": 9090,
+    "openclawWebhookUrl": "https://your-openclaw-server.com/webhook/opencode-results",
+    "openclawApiKey": "${OPENCLAW_API_KEY}",
+    "maxConcurrentTasks": 5
+  }
+}
+```
+
+> **Note:** The `opencode_fire_async` tool works without this plugin, but the webhook callback feature requires the plugin to be installed and configured in OpenCode.
+
+### Webhook Callback Format
+
+When a task completes, OpenClaw receives a POST request with this payload:
+
+```json
+{
+  "taskId": "task_abc123",
+  "sessionId": "ses_xyz789",
+  "status": "completed",
+  "result": "Task execution results...",
+  "prompt": "Original task prompt",
+  "providerID": "anthropic",
+  "modelID": "claude-opus-4-6",
+  "directory": "/path/to/project",
+  "createdAt": "2024-03-12T10:00:00Z",
+  "completedAt": "2024-03-12T10:05:00Z"
+}
+```
 
 ## Key Tools
 
@@ -102,6 +147,9 @@ opencode_check({ sessionId: "..." })
 
 **OpenClaw async with automatic callback:**
 ```
+// REQUIREMENT: Install @opencode-ai/plugin-openclaw in OpenCode
+// See "OpenClaw Async Callbacks" section above for setup
+
 // OpenClaw initiates a long-running task and gets notified automatically
 opencode_fire_async({
   prompt: "Refactor the entire codebase to TypeScript with strict types",
