@@ -64,7 +64,7 @@ To use the `opencode_fire_async` tool with automatic webhook callbacks to OpenCl
 
 ```bash
 # Install the plugin in your OpenCode project
-npm install @opencode-ai/plugin-openclaw
+npm install @laceletho/plugin-openclaw
 ```
 
 ### 2. Configure OpenClaw to Receive Webhooks
@@ -95,7 +95,7 @@ Add to your `opencode.json`:
 
 ```json
 {
-  "plugins": ["@opencode-ai/plugin-openclaw"],
+  "plugins": ["@laceletho/plugin-openclaw"],
   "openclaw": {
     "port": 9090,
     "openclawWebhookUrl": "http://localhost:18789/hooks/agent",
@@ -197,7 +197,7 @@ opencode_check({ sessionId: "..." })
 
 **OpenClaw async with automatic callback:**
 ```
-// REQUIREMENT: Install @opencode-ai/plugin-openclaw in OpenCode
+// REQUIREMENT: Install @laceletho/plugin-openclaw in OpenCode
 // Configure OpenClaw with hooks.enabled: true
 // See "OpenClaw Async Callbacks" section above for setup
 
